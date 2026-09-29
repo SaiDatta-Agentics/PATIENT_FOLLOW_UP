@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8000"
+    environment:
+      DEMO_MODE: "true"
+      AUTO_FOLLOWUP_ENABLED: "true"
+      FOLLOWUP_POLL_SECONDS: "15"
+      DATABASE_URL: "sqlite+aiosqlite:////data/followup.db"
+      SECRET_KEY: "local-demo-secret-change-me"
+      CLINIC_ACCESS_CODE: "CLINIC-DEMO"
+    volumes:
+      - followup-data:/data
+volumes:
+  followup-data:

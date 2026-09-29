@@ -1,0 +1,130 @@
+"""
+Clinic-safe deterministic intent classification.
+
+LangGraph uses this node before deciding which workflow branch to execute.
+"""
+import re
+from app.models.models import Intent
+
+
+INTENT_PATTERNS = {
+    Intent.BOOK_APPOINTMENT:
+        r"\b(book|schedule|appointment|visit|available)\b|come in|sign me up|tomorrow|next week",
+
+    Intent.RESCHEDULE_APPOINTMENT:
+        r"\breschedule\b|change.*appointment|move.*appointment|different (day|time|date)",
+
+    Intent.CONFIRM_APPOINTMENT:
+        r"\bconfirm\b|yes.*appointment|i('ll| will) be there|see you",
+
+    Intent.CANCEL_APPOINTMENT:
+        r"\bcancel\b|don't want|do not want|no longer|not coming",
+
+    Intent.TREATMENT_QUESTION:
+        r"do i (still )?need|why.*come back|is it (done|finished|complete)|pain.*gone.*still|hurt.*gone.*still",
+
+    Intent.FEE_QUESTION:
+        r"\b(cost|price|fee|charge|afford|expensive)\b|how much",
+
+    Intent.PAYMENT_ISSUE:
+        r"\b(pay|bill|insurance)\b|payment plan|can't afford|cannot afford|dispute",
+
+    Intent.NOT_INTERESTED:
+        r"not interested|don't bother|do not bother|stop (calling|messaging|texting)|leave me alone",
+
+    Intent.REQUEST_HUMAN:
+        r"(talk|speak).*(human|person|doctor|dentist|staff|someone)|real person",
+}
+
+
+SYMPTOM_PATTERN = (
+    r"\b(pain|hurt|hurting|swell|swelling|swollen|bleed|bleeding|"
+    r"fever|worse|throb|throbbing|ache|aching|sensitive|numb)\b"
+)
+
+
+NEGATED_SYMPTOMS = [
+    r"\bno pain\b",
+    r"\bnot in pain\b",
+    r"\bdon't have pain\b",
+    r"\bdo not have pain\b",
+    r"\bdoesn't hurt\b",
+    r"\bdoes not hurt\b",
+    r"\bdon't hurt\b",
+    r"\bdo not hurt\b",
+    r"\bpain is gone\b",
+    r"\bpain has gone\b",
+    r"\bpain went away\b",
+]
+
+
+def classify_intent(message: str) -> Intent:
+
+    text = message.lower().strip()
+
+    if not text:
+        return Intent.NO_RESPONSE
+
+    # Treatment questions take priority over a negated symptom.
+    treatment_pattern = INTENT_PATTERNS[Intent.TREATMENT_QUESTION]
+
+    if re.search(treatment_pattern, text, re.IGNORECASE):
+        return Intent.TREATMENT_QUESTION
+
+    has_symptom = bool(
+        re.search(SYMPTOM_PATTERN, text, re.IGNORECASE)
+    )
+
+    negated = any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in NEGATED_SYMPTOMS
+    )
+
+    if has_symptom and not negated:
+        return Intent.PAIN_OR_SYMPTOM
+
+    scores = {}
+
+    for intent, pattern in INTENT_PATTERNS.items():
+
+        matches = re.findall(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        if matches:
+            scores[intent] = len(matches)
+
+    if not scores:
+        return Intent.OTHER
+
+    return max(scores, key=scores.get)
+
+
+def is_urgent(intent: Intent, message: str) -> bool:
+
+    text = message.lower()
+
+    urgent_pattern = (
+        r"\bsevere\b|"
+        r"\bemergency\b|"
+        r"\bunbearable\b|"
+        r"can't (eat|sleep)|"
+        r"cannot (eat|sleep)|"
+        r"swollen.*face|"
+        r"face.*swollen|"
+        r"high fever|"
+        r"bleeding.*lot"
+    )
+
+    return (
+        intent == Intent.PAIN_OR_SYMPTOM
+        and bool(
+            re.search(
+                urgent_pattern,
+                text,
+                re.IGNORECASE
+            )
+        )
+    )
